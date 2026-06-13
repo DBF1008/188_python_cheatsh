@@ -37,6 +37,7 @@ _INTERNAL_TOPICS = [
     ":post",
     ":styles",
     ":styles-demo",
+    ":submissions",
     ":vim",
     ":zsh",
 ]
@@ -96,6 +97,9 @@ class InternalPages(Adapter):
             answer = "\n".join(CONFIG["frontend.styles"]) + "\n"
         elif topic == ":stat":
             answer = self._get_stat() + "\n"
+        elif topic == ":submissions":
+            from post import get_submissions_report
+            answer = get_submissions_report()
         elif topic in _INTERNAL_TOPICS:
             answer = open(
                 os.path.join(CONFIG["path.internal.pages"], topic[1:] + ".txt"), "r"

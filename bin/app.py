@@ -288,10 +288,16 @@ def answer(topic=None):
             save_query(request_id, topic)
 
     if request.method == "POST":
-        process_post_request(request, html_needed)
+        ip_address = get_request_ip(request)
+        result = process_post_request(
+            request,
+            topic=topic,
+            ip_addr=ip_address,
+            user_agent=user_agent,
+        )
         if html_needed:
             return redirect("/")
-        return "OK\n"
+        return result
 
     if "topic" in request.args:
         return redirect("/%s" % request.args.get("topic"))
