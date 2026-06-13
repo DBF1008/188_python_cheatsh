@@ -60,6 +60,11 @@ class Router(object):
             CONFIG["routing.pre"] + self.routing_table + CONFIG["routing.post"]
         )
 
+    def reset_cache(self):
+        """Reset internal caches (topic types and topics list). Useful for tests."""
+        self._cached_topics_list = []
+        self._cached_topic_type = {}
+
     def get_topics_list(self, skip_dirs=False, skip_internal=False):
         """
         List of topics returned on /:list
@@ -164,6 +169,124 @@ class Router(object):
 
         # Here if not a random request, we just forward the topic
         return topic
+
+    def diagnose(self, topic: str) -> Dict[str, Any]:
+        """
+        Trace the routing pipeline for `topic` without calling adapters.
+
+        Returns a dict with:
+            explicit_topic_type, effective_topic,
+            is_random, random_resolved,
+            routing_trace, topic_types, adapter_order,
+            cache_info, resolution_reason
+        """
+
+        result = {
+            "explicit_topic_type": "",
+            "effective_topic": topic,
+            "is_random": False,
+            "random_resolved": "",
+            "routing_trace": [],
+            "topic_types": [],
+            "adapter_order": [],
+            "cache_info": [],
+            "resolution_reason": "",
+        }
+
+        # 1. Strip explicit topic type prefix (e.g. "tldr:ls" -> type="tldr", topic="ls")
+        if re.match("[^/]+:", topic):
+            result["explicit_topic_type"], topic = topic.split(":", 1)
+
+        # 2. Handle :random resolution
+        resolved = self.handle_if_random_request(topic)
+        if resolved != topic:
+            result["is_random"] = True
+            result["random_resolved"] = resolved
+            topic = resolved
+
+        result["effective_topic"] = topic
+
+        # 3. Walk routing table, recording every entry
+        trace = []
+        matched_routes = []
+        for regexp, route in self.routing_table:
+            regex_matched = bool(re.search(regexp, topic))
+            is_found_result = None
+            if regex_matched:
+                if route in self._adapter:
+                    is_found_result = self._adapter[route].is_found(topic)
+                    if is_found_result:
+                        matched_routes.append(route)
+                else:
+                    # Adapter not instantiated — treat as matched unconditionally
+                    is_found_result = None
+                    matched_routes.append(route)
+
+            trace.append({
+                "regexp": regexp,
+                "route": route,
+                "regex_matched": regex_matched,
+                "is_found": is_found_result,
+            })
+
+        result["routing_trace"] = trace
+
+        # 4. Build topic_types list (same logic as get_topic_type)
+        if not matched_routes:
+            topic_types = [CONFIG["routing.default"]]
+        elif len(matched_routes) > 1:
+            topic_types = matched_routes[:-1]
+        else:
+            topic_types = matched_routes
+
+        # 5. Apply explicit type filter
+        explicit = result["explicit_topic_type"]
+        if explicit and explicit in topic_types:
+            topic_types = [explicit]
+
+        result["topic_types"] = topic_types
+        result["adapter_order"] = list(topic_types)
+
+        # 6. Build cache_info for each adapter
+        for topic_type in topic_types:
+            if topic_type in self._adapter:
+                cache_needed = self._adapter[topic_type].is_cache_needed()
+            else:
+                cache_needed = False
+
+            if topic_type == "question":
+                cache_key_pattern = "q:" + topic
+            else:
+                cache_key_pattern = "%s:%s" % (topic_type, topic)
+
+            result["cache_info"].append({
+                "adapter": topic_type,
+                "cache_needed": cache_needed,
+                "cache_key_pattern": cache_key_pattern,
+            })
+
+        # 7. Build resolution_reason
+        if topic_types == ["unknown"]:
+            result["resolution_reason"] = (
+                "Single-word topic not found in any data adapter "
+                "-> unknown (fuzzy suggestions)"
+            )
+        elif topic_types == ["question"]:
+            result["resolution_reason"] = (
+                "No routing rule matched any adapter "
+                "-> default question adapter (StackOverflow)"
+            )
+        elif explicit and explicit not in matched_routes:
+            result["resolution_reason"] = (
+                "Explicit type '%s' requested but no adapter matched the topic "
+                "-> type filter could not be satisfied" % explicit
+            )
+        else:
+            result["resolution_reason"] = "Matched %d adapter(s): %s" % (
+                len(topic_types), ", ".join(topic_types),
+            )
+
+        return result
 
     def get_answers(
         self, topic: str, request_options: Dict[str, str] = None

@@ -25,6 +25,7 @@ from fmt.internal import colorize_internal
 _INTERNAL_TOPICS = [
     ":cht.sh",
     ":bash_completion",
+    ":debug",
     ":emacs",
     ":emacs-ivy",
     ":firstpage",
