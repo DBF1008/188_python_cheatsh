@@ -74,7 +74,10 @@ def match(paragraph, keyword, options=None, options_dict=None):
 
         regex = re.escape(kwrd)
         if options_dict["word_boundaries"]:
-            regex = r"\b%s\b" % kwrd
+            # Add boundaries around the *escaped* keyword. ``\b`` misbehaves
+            # when the keyword starts/ends with a non-word char (e.g. ``c++``),
+            # so forbid an adjacent word char with lookarounds instead.
+            regex = r"(?<!\w)%s(?!\w)" % regex
 
         if options_dict["insensitive"]:
             if not re.search(regex, paragraph, re.IGNORECASE):
