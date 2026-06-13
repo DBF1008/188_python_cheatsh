@@ -74,6 +74,26 @@ def _github_button(topic_type):
     return button
 
 
+def _restore_sheet_path(query):
+    """
+    Restore the cheat.sheets repository path from a page `query`.
+
+    In the cheat.sheets repository every *directory* name is prefixed with an
+    underscore, and that underscore is stripped before the page name is shown
+    to the user (the file ``sheets/_python/_django/templates`` is served as the
+    query ``python/django/templates``).  To build a link back to the source
+    file the underscore has to be added back to *every* directory component,
+    while the last component (the file name) is left untouched.
+
+    This is the inverse used to render edit links and must stay in sync with
+    ``_sanitize_dirnames(query, restore=True)`` in
+    ``lib/adapter/cheat_sheets.py``.
+    """
+    parts = query.split("/")
+    directories, page = parts[:-1], parts[-1]
+    return "/".join(["_" + directory for directory in directories] + [page])
+
+
 def _render_html(
     query, result, editable, repository_button, topics_list, request_options
 ):
@@ -125,11 +145,12 @@ def _render_html(
 
     edit_button = ""
     if editable:
-        # It's possible that topic directory starts with omitted underscore
-        if "/" in query:
-            query = "_" + query
+        # Directory names in the cheat.sheets repository carry a leading
+        # underscore that is hidden in the page name; restore it so the link
+        # points at the real source file (nested directories included).
+        sheet_path = _restore_sheet_path(query)
         edit_page_link = (
-            "https://github.com/chubin/cheat.sheets/edit/master/sheets/" + query
+            "https://github.com/chubin/cheat.sheets/edit/master/sheets/" + sheet_path
         )
         edit_button = (
             '<pre style="position:absolute;padding-left:40em;overflow:visible;height:0;">'
