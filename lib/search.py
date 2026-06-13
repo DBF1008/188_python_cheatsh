@@ -72,16 +72,22 @@ def match(paragraph, keyword, options=None, options_dict=None):
         if not kwrd:
             continue
 
-        regex = re.escape(kwrd)
-        if options_dict["word_boundaries"]:
-            regex = r"\b%s\b" % kwrd
-
-        if options_dict["insensitive"]:
-            if not re.search(regex, paragraph, re.IGNORECASE):
-                return False
+        if options_dict.get("word_boundaries"):
+            escaped = re.escape(kwrd)
+            # Add \b only at sides where the keyword touches a word char;
+            # \b is a transition between \w and \W, so it cannot anchor
+            # against a leading/trailing non-word char like '+' or '['.
+            if re.match(r"\w", kwrd[0]):
+                escaped = r"\b" + escaped
+            if re.match(r"\w", kwrd[-1]):
+                escaped = escaped + r"\b"
+            regex = escaped
         else:
-            if not re.search(regex, paragraph):
-                return False
+            regex = re.escape(kwrd)
+
+        flags = re.IGNORECASE if options_dict.get("insensitive") else 0
+        if not re.search(regex, paragraph, flags):
+            return False
     return True
 
 
