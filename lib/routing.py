@@ -246,8 +246,213 @@ class Router(object):
 
         return answers
 
+    def get_query_diagnostics(self, topic, request_options=None):
+        """
+        Return a read-only diagnostics dict explaining how `topic` is routed.
+
+        The result reproduces the decision flow of `get_answers()` (explicit
+        `<topic_type>:` split, `:random` handling, topic-type resolution and
+        explicit narrowing) and adds a per-rule routing trace, the final
+        adapter order, a read-only cache probe and a human-readable explanation
+        of the branch that is taken (internal / unknown / question / content).
+
+        No cheat sheets are fetched: `_get_page_dict()` is never called and the
+        cache is only read, never written.
+        """
+
+        diag = {
+            "topic": topic,
+            "explicit_topic_type": None,
+            "explicit_applied": False,
+            "topic_after_type_split": topic,
+            "random_request": False,
+            "topic_after_random": topic,
+            "routing_table_trace": [],
+            "raw_selected": [],
+            "default_applied": False,
+            "trimmed_last": False,
+            "topic_types": [],
+            "adapter_order": [],
+            "cache": [],
+            "branch": {},
+        }
+
+        # 1. explicit "<topic_type>:<topic>" split (same as get_answers)
+        explicit_topic_type = ""
+        if re.match("[^/]+:", topic):
+            explicit_topic_type, topic = topic.split(":", 1)
+        diag["explicit_topic_type"] = explicit_topic_type or None
+        diag["topic_after_type_split"] = topic
+
+        # 2. :random handling (same as get_answers)
+        diag["random_request"] = (
+            topic.endswith("/:random") or topic.lstrip("/") == ":random"
+        )
+        topic = self.handle_if_random_request(topic)
+        diag["topic_after_random"] = topic
+
+        # 3. authoritative topic types
+        topic_types = self.get_topic_type(topic)
+
+        # 4. per-rule routing trace, reproducing the append rule of
+        #    Router.get_topic_type.__get_topic_type (regex match AND
+        #    (route is not an adapter OR adapter.is_found))
+        raw_selected = []
+        for regexp, route in self.routing_table:
+            regex_matched = bool(re.search(regexp, topic))
+            is_adapter = route in self._adapter
+            found = None
+            selected = False
+            if regex_matched:
+                if is_adapter:
+                    found = self._adapter[route].is_found(topic)
+                    selected = bool(found)
+                else:
+                    selected = True
+            if selected:
+                raw_selected.append(route)
+            diag["routing_table_trace"].append(
+                {
+                    "regexp": regexp,
+                    "route": route,
+                    "regex_matched": regex_matched,
+                    "is_adapter": is_adapter,
+                    "is_found": found,
+                    "selected": selected,
+                }
+            )
+        diag["raw_selected"] = raw_selected
+        diag["default_applied"] = not raw_selected
+        # get_topic_type drops the last selected route when more than one matched
+        diag["trimmed_last"] = len(raw_selected) > 1
+
+        # 5. explicit narrowing (same as get_answers)
+        if explicit_topic_type and explicit_topic_type in topic_types:
+            topic_types = [explicit_topic_type]
+            diag["explicit_applied"] = True
+        diag["topic_types"] = list(topic_types)
+        diag["adapter_order"] = list(topic_types)
+
+        # 6. read-only cache probe, mirroring the cache keys of get_answers
+        diag["cache"] = self._probe_cache(topic, topic_types)
+
+        # 7. branch explanation
+        diag["branch"] = self._diagnose_branch(
+            topic_types, raw_selected, explicit_topic_type, diag["explicit_applied"]
+        )
+
+        return diag
+
+    def _probe_cache(self, topic, topic_types):
+        """
+        Read-only cache probe for the resolved `topic_types`.
+        Never writes the cache. Returns a list of per-entry dicts.
+        """
+
+        cache_off = CONFIG.get("cache.type") != "redis"
+
+        def _probe(key):
+            if cache_off:
+                return False, "disabled"
+            try:
+                value = cache.get(key)
+            except Exception:  # pylint: disable=broad-except
+                # cache backend (redis) unreachable - diagnostics must not crash
+                return False, "unavailable"
+            hit = value is not None
+            return hit, ("hit" if hit else "miss")
+
+        # 'question' answers use a dedicated "q:" cache key (see get_answers)
+        if topic_types == ["question"]:
+            key = "q:" + topic
+            hit, status = _probe(key)
+            return [
+                {
+                    "topic_type": "question",
+                    "cache_entry_name": key,
+                    "cache_needed": True,
+                    "cache_hit": hit,
+                    "cache_status": status,
+                }
+            ]
+
+        entries = []
+        for topic_type in topic_types:
+            key = "%s:%s" % (topic_type, topic)
+            cache_needed = self._adapter[topic_type].is_cache_needed()
+            if not cache_needed:
+                entries.append(
+                    {
+                        "topic_type": topic_type,
+                        "cache_entry_name": key,
+                        "cache_needed": False,
+                        "cache_hit": False,
+                        "cache_status": "disabled",
+                    }
+                )
+                continue
+            hit, status = _probe(key)
+            entries.append(
+                {
+                    "topic_type": topic_type,
+                    "cache_entry_name": key,
+                    "cache_needed": True,
+                    "cache_hit": hit,
+                    "cache_status": status,
+                }
+            )
+        return entries
+
+    def _diagnose_branch(
+        self, topic_types, raw_selected, explicit_topic_type, explicit_applied
+    ):
+        """
+        Build a human-readable explanation of why `topic_types` was chosen.
+        """
+
+        default_route = CONFIG["routing.default"]
+        primary = topic_types[0] if topic_types else None
+        is_unknown = "unknown" in topic_types
+        is_internal = primary == "internal"
+
+        reasons = []
+        if explicit_applied:
+            reasons.append(
+                "Explicit topic_type '%s' was requested and matched, so only that "
+                "adapter is used." % explicit_topic_type
+            )
+        if not raw_selected:
+            reasons.append(
+                "No routing rule selected an adapter, so the default route '%s' is used."
+                % default_route
+            )
+        elif is_unknown:
+            reasons.append(
+                "The catch-all post route ('^[^/ +]*$' -> unknown) matched; the "
+                "'unknown' adapter always reports found and returns fuzzy topic "
+                "suggestions."
+            )
+        elif is_internal:
+            reasons.append(
+                "An internal route ('^:' or '/:list$') matched and the 'internal' "
+                "adapter found the page."
+            )
+        else:
+            reasons.append(
+                "Resolved to content adapter(s): %s." % ", ".join(topic_types)
+            )
+
+        return {
+            "primary_topic_type": primary,
+            "is_internal": is_internal,
+            "is_unknown": is_unknown,
+            "is_question": primary == default_route,
+            "reason": " ".join(reasons),
+        }
+
 
 # pylint: disable=invalid-name
 _ROUTER = Router()
 get_topics_list = _ROUTER.get_topics_list
 get_answers = _ROUTER.get_answers
+get_query_diagnostics = _ROUTER.get_query_diagnostics
