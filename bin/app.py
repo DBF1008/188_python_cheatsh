@@ -288,7 +288,7 @@ def answer(topic=None):
             save_query(request_id, topic)
 
     if request.method == "POST":
-        process_post_request(request, html_needed)
+        process_post_request(request, topic, html_needed)
         if html_needed:
             return redirect("/")
         return "OK\n"
