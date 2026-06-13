@@ -18,6 +18,7 @@ config.CONFIG["cache.type"] = "none"
 
 import cheat_wrapper
 import options
+from query import DEFAULT_TOPIC
 
 
 def show_usage():
@@ -56,7 +57,7 @@ def parse_cmdline(args):
 
     query = parsed.path.lstrip("/")
     if not query:
-        query = ":firstpage"
+        query = DEFAULT_TOPIC
 
     return query, request_options
 

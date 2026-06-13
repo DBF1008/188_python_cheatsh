@@ -35,6 +35,7 @@ from limits import Limits
 from cheat_wrapper import cheat_wrapper
 from post import process_post_request
 from options import parse_args
+from query import DEFAULT_TOPIC
 
 from stateful_queries import save_query, last_query
 
@@ -297,7 +298,7 @@ def answer(topic=None):
         return redirect("/%s" % request.args.get("topic"))
 
     if topic is None:
-        topic = ":firstpage"
+        topic = DEFAULT_TOPIC
 
     if topic.startswith(":shell-x/"):
         return _proxy()
