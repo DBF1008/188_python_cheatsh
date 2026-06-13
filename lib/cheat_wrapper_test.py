@@ -1,4 +1,4 @@
-from cheat_wrapper import _add_section_name
+from query import add_section_name
 
 unchanged = """
 python/:list
@@ -33,8 +33,8 @@ g++/-O1
 
 def test_header_split():
     for inp in unchanged.strip().splitlines():
-        assert inp == _add_section_name(inp)
+        assert inp == add_section_name(inp)
 
     for test in split.strip().split("\n\n"):
         inp, outp = test.split("\n")
-        assert outp == _add_section_name(inp)
+        assert outp == add_section_name(inp)
