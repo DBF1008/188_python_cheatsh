@@ -33,7 +33,7 @@ class Router(object):
 
     def __init__(self):
 
-        self._cached_topics_list = []
+        self._cached_topics_list = {}
         self._cached_topic_type = {}
 
         adapter_class = adapter.all_adapters(as_dict=True)
@@ -63,10 +63,18 @@ class Router(object):
     def get_topics_list(self, skip_dirs=False, skip_internal=False):
         """
         List of topics returned on /:list
+
+        The result depends on `skip_dirs`/`skip_internal`, so each
+        combination is cached separately. Keyword search asks for the
+        filtered variant (no internal pages, no cheat.sheets dirs), while
+        the HTML input hint, /:list, unknown-topic suggestions and :random
+        need the full list; caching them under one key made whichever ran
+        first win and silently dropped topics from the others.
         """
 
-        if self._cached_topics_list:
-            return self._cached_topics_list
+        cache_key = (skip_dirs, skip_internal)
+        if cache_key in self._cached_topics_list:
+            return self._cached_topics_list[cache_key]
 
         skip = ["fosdem"]
         if skip_dirs:
@@ -80,7 +88,7 @@ class Router(object):
             answer.update({name: key for name in self._topic_list[key]})
         answer = sorted(set(answer.keys()))
 
-        self._cached_topics_list = answer
+        self._cached_topics_list[cache_key] = answer
         return answer
 
     def get_topic_type(self, topic: str) -> List[str]:
