@@ -18,6 +18,24 @@ from config import CONFIG
 from globals import error
 from buttons import TWITTER_BUTTON, GITHUB_BUTTON, GITHUB_BUTTON_FOOTER
 import frontend.ansi
+from adapter.cheat_sheets import _sanitize_dirnames
+
+
+_CHEAT_SHEETS_EDIT_BASE = (
+    "https://github.com/chubin/cheat.sheets/edit/master/sheets/"
+)
+
+
+def _build_edit_link(query):
+    """Build the GitHub edit link for a cheat.sheets page.
+
+    The cheat.sheets repository prefixes every directory component with
+    an underscore (``_go/_strings/TrimSuffix``), while the query uses the
+    user-friendly form without underscores (``go/strings/TrimSuffix``).
+    This function restores the repository path before building the URL.
+    """
+    sheet_path = _sanitize_dirnames(query, restore=True)
+    return _CHEAT_SHEETS_EDIT_BASE + sheet_path
 
 # temporary having it here, but actually we have the same data
 # in the adapter module
@@ -125,12 +143,7 @@ def _render_html(
 
     edit_button = ""
     if editable:
-        # It's possible that topic directory starts with omitted underscore
-        if "/" in query:
-            query = "_" + query
-        edit_page_link = (
-            "https://github.com/chubin/cheat.sheets/edit/master/sheets/" + query
-        )
+        edit_page_link = _build_edit_link(query)
         edit_button = (
             '<pre style="position:absolute;padding-left:40em;overflow:visible;height:0;">'
             '[<a href="%s" style="color:cyan">edit</a>]'
