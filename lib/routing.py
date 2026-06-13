@@ -33,7 +33,7 @@ class Router(object):
 
     def __init__(self):
 
-        self._cached_topics_list = []
+        self._cached_topics_list = {}
         self._cached_topic_type = {}
 
         adapter_class = adapter.all_adapters(as_dict=True)
@@ -65,8 +65,9 @@ class Router(object):
         List of topics returned on /:list
         """
 
-        if self._cached_topics_list:
-            return self._cached_topics_list
+        cache_key = (skip_internal, skip_dirs)
+        if cache_key in self._cached_topics_list:
+            return self._cached_topics_list[cache_key]
 
         skip = ["fosdem"]
         if skip_dirs:
@@ -80,7 +81,7 @@ class Router(object):
             answer.update({name: key for name in self._topic_list[key]})
         answer = sorted(set(answer.keys()))
 
-        self._cached_topics_list = answer
+        self._cached_topics_list[cache_key] = answer
         return answer
 
     def get_topic_type(self, topic: str) -> List[str]:
